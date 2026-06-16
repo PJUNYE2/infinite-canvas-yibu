@@ -16,7 +16,7 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { isImageTaskPollingError, requestEdit, requestGeneration, resumeImageTask } from "@/services/api/image";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import type { ReferenceImage } from "@/types/image";
@@ -37,6 +37,8 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    taskId?: string;
+    recoverable?: boolean;
 };
 
 type GenerationLog = {
@@ -282,18 +284,25 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
+    const applyGeneratedImage = async (index: number, image: { id: string; dataUrl: string }, startedAtMs: number) => {
+        if (!image) throw new Error("接口没有返回图片");
+        const meta = await readImageMeta(image.dataUrl);
+        const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - startedAtMs, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+        setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage, error: undefined, taskId: undefined, recoverable: false }));
+        return nextImage;
+    };
+
     const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         try {
             const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
-            const image = result[0];
-            if (!image) throw new Error("接口没有返回图片");
-            const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
-            return nextImage;
+            return await applyGeneratedImage(index, result[0], itemStartedAt);
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            if (isImageTaskPollingError(error)) {
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId: error.taskId, recoverable: true, error: `${error.message}。任务 ID：${error.taskId}` }));
+            } else {
+                setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败", recoverable: false }));
+            }
             throw error;
         }
     };
@@ -302,8 +311,21 @@ export default function ImagePage() {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
         setPreviewLog(null);
-        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
+        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined, taskId: undefined, recoverable: false }));
         void runGenerationSlot(index, snapshot).catch(() => {});
+    };
+
+    const resumeResult = (index: number, taskId: string) => {
+        const snapshot = buildRequestSnapshot();
+        if (!snapshot) return;
+        const itemStartedAt = performance.now();
+        setPreviewLog(null);
+        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined }));
+        void resumeImageTask(snapshot.config, taskId)
+            .then((items) => applyGeneratedImage(index, items[0], itemStartedAt))
+            .catch((error) => {
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: error instanceof Error ? `${error.message}。任务 ID：${taskId}` : `继续查询失败。任务 ID：${taskId}` }));
+            });
     };
 
     return (
@@ -428,7 +450,7 @@ export default function ImagePage() {
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} taskId={result.taskId} recoverable={result.recoverable} onResume={result.taskId ? () => resumeResult(index, result.taskId!) : undefined} onRetry={() => retryResult(index)} />
                                     ) : (
                                         <PendingImageCard key={result.id} />
                                     ),
@@ -559,18 +581,24 @@ function PendingImageCard() {
     );
 }
 
-function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedImageCard({ error, taskId, recoverable, onResume, onRetry }: { error: string; taskId?: string; recoverable?: boolean; onResume?: () => void; onRetry: () => void }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
+        <div className={`overflow-hidden rounded-lg border ${recoverable ? "border-amber-200 bg-amber-50 dark:border-amber-950 dark:bg-amber-950/20" : "border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20"}`}>
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">生成失败</div>
-                <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
+                <div className={`text-sm font-medium ${recoverable ? "text-amber-700 dark:text-amber-300" : "text-red-600 dark:text-red-300"}`}>{recoverable ? "任务已提交" : "生成失败"}</div>
+                <Typography.Paragraph ellipsis={{ rows: 4 }} className={`!mb-0 !text-xs ${recoverable ? "!text-amber-700 dark:!text-amber-300" : "!text-red-500 dark:!text-red-300"}`}>
                     {error}
                 </Typography.Paragraph>
+                {taskId ? <div className="max-w-full truncate rounded bg-black/5 px-2 py-1 font-mono text-[11px] text-stone-500 dark:bg-white/10 dark:text-stone-300">{taskId}</div> : null}
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
-                <Button size="small" danger onClick={onRetry}>
-                    重试
+            <div className={`flex justify-end gap-2 border-t p-3 ${recoverable ? "border-amber-200 dark:border-amber-950" : "border-red-200 dark:border-red-950"}`}>
+                {recoverable && onResume ? (
+                    <Button size="small" type="primary" onClick={onResume}>
+                        继续查询
+                    </Button>
+                ) : null}
+                <Button size="small" danger={!recoverable} onClick={onRetry}>
+                    重新生成
                 </Button>
             </div>
         </div>

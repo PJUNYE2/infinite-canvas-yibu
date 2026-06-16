@@ -88,6 +88,20 @@ type ImageAsyncTaskResponse = {
 };
 type RequestOptions = { signal?: AbortSignal };
 
+export class ImageTaskPollingError extends Error {
+    taskId: string;
+
+    constructor(taskId: string, message: string) {
+        super(message);
+        this.name = "ImageTaskPollingError";
+        this.taskId = taskId;
+    }
+}
+
+export function isImageTaskPollingError(error: unknown): error is ImageTaskPollingError {
+    return error instanceof ImageTaskPollingError || Boolean(error && typeof error === "object" && "taskId" in error);
+}
+
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
     medium: 2048,
@@ -244,7 +258,8 @@ function buildBananaAsyncPayload(config: AiConfig, prompt: string, images?: stri
 
 async function submitBananaAsyncTask(config: AiConfig, prompt: string, images: string[] | undefined, options?: RequestOptions) {
     const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(config, "/images/generations/async"), buildBananaAsyncPayload(config, prompt, images), { headers: aiHeaders(config, "application/json"), signal: options?.signal });
-    return await pollImageTask(config, resolveTaskId(response.data), 1, options);
+    const taskId = resolveTaskId(response.data);
+    return await pollSubmittedImageTask(config, taskId, 1, options);
 }
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
@@ -359,6 +374,20 @@ async function fetchProtectedImageDataUrl(config: AiConfig, url: string, options
     const response = await fetch(resolveTaskResultUrl(config, url), { headers: aiHeaders(config), signal: options?.signal });
     if (!response.ok) throw new Error(await readFetchError(response, "获取图片结果失败"));
     return await blobToDataUrl(await response.blob());
+}
+
+async function pollSubmittedImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {
+    try {
+        return await pollImageTask(config, taskId, expectedCount, options);
+    } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+        throw new ImageTaskPollingError(taskId, error instanceof Error ? error.message : "任务已提交，但轮询结果失败，可稍后继续查询");
+    }
+}
+
+export async function resumeImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    return await pollImageTask(requestConfig, taskId, 1, options);
 }
 
 async function pollImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {
@@ -572,6 +601,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         try {
             return await submitBananaAsyncTask(requestConfig, prompt, undefined, options);
         } catch (error) {
+            if (isImageTaskPollingError(error)) throw error;
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
@@ -590,8 +620,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 
     try {
         const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        return await pollImageTask(requestConfig, resolveTaskId(response.data), n, options);
+        const taskId = resolveTaskId(response.data);
+        return await pollSubmittedImageTask(requestConfig, taskId, n, options);
     } catch (error) {
+        if (isImageTaskPollingError(error)) throw error;
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }
@@ -605,6 +637,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
             return await submitBananaAsyncTask(requestConfig, requestPrompt, images, options);
         } catch (error) {
+            if (isImageTaskPollingError(error)) throw error;
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
@@ -629,8 +662,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
     try {
         const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        return await pollImageTask(requestConfig, resolveTaskId(response.data), n, options);
+        const taskId = resolveTaskId(response.data);
+        return await pollSubmittedImageTask(requestConfig, taskId, n, options);
     } catch (error) {
+        if (isImageTaskPollingError(error)) throw error;
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }

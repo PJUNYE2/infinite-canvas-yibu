@@ -396,7 +396,7 @@ async function pollSubmittedImageTask(config: AiConfig, taskId: string, expected
 
 export async function resumeImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
-    return await pollImageTask(requestConfig, taskId, 1, options);
+    return await pollSubmittedImageTask(requestConfig, taskId, 1, options);
 }
 
 async function pollImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {

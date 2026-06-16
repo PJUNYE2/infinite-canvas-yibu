@@ -364,12 +364,12 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
     const recoverable = Boolean(node.metadata?.asyncTaskRecoverable && node.metadata?.asyncTaskId);
     return (
-        <div className={`flex w-[min(82%,520px)] flex-col items-center gap-4 rounded-2xl border px-6 py-5 text-center shadow-lg backdrop-blur ${recoverable ? "border-amber-400/30 bg-amber-950/25" : "border-red-400/25 bg-red-950/20"}`}>
-            <div className={`whitespace-pre-wrap break-words text-base font-semibold leading-7 md:text-lg ${recoverable ? "text-amber-200" : "text-red-200"}`}>{node.metadata?.errorDetails || "生成失败"}</div>
-            {node.metadata?.asyncTaskId ? <div className="max-w-full break-all rounded-lg bg-white/10 px-3 py-2 font-mono text-sm leading-5 text-stone-100/90">{node.metadata.asyncTaskId}</div> : null}
+        <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
+            <div className={`text-xs leading-5 ${recoverable ? "text-amber-300" : "text-red-300"}`}>{node.metadata?.errorDetails || "生成失败"}</div>
+            {node.metadata?.asyncTaskId ? <div className="max-w-full truncate rounded bg-white/10 px-2 py-1 font-mono text-[11px] opacity-75">{node.metadata.asyncTaskId}</div> : null}
             <button
                 type="button"
-                className="inline-flex h-10 items-center gap-2 rounded-full border px-5 text-sm font-semibold transition hover:scale-[1.02]"
+                className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                 onClick={(event) => {
                     event.stopPropagation();
@@ -377,7 +377,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
             >
-                <RefreshCw className="size-4" />
+                <RefreshCw className="size-3.5" />
                 {recoverable ? "继续查询" : "重试"}
             </button>
         </div>

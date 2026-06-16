@@ -2305,7 +2305,7 @@ function InfiniteCanvasPage() {
                     return;
                 } catch (error) {
                     if (isGenerationCanceled(error)) return;
-                    const errorDetails = error instanceof Error ? `${error.message}。任务ID:${taskId}` : `继续查询失败。任务ID:${taskId}`;
+                    const errorDetails = `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}`;
                     message.error(errorDetails);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item)));
                     return;

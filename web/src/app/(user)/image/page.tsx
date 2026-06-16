@@ -324,7 +324,7 @@ export default function ImagePage() {
         void resumeImageTask(snapshot.config, taskId)
             .then((items) => applyGeneratedImage(index, items[0], itemStartedAt))
             .catch((error) => {
-                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: error instanceof Error ? `${error.message}。任务ID:${taskId}` : `继续查询失败。任务ID:${taskId}` }));
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}` }));
             });
     };
 

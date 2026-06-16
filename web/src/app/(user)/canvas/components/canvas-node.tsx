@@ -362,9 +362,11 @@ function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
 }
 
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
+    const recoverable = Boolean(node.metadata?.asyncTaskRecoverable && node.metadata?.asyncTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || "生成失败"}</div>
+            <div className={`text-xs leading-5 ${recoverable ? "text-amber-300" : "text-red-300"}`}>{node.metadata?.errorDetails || "生成失败"}</div>
+            {node.metadata?.asyncTaskId ? <div className="max-w-full truncate rounded bg-white/10 px-2 py-1 font-mono text-[11px] opacity-75">{node.metadata.asyncTaskId}</div> : null}
             <button
                 type="button"
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
@@ -376,7 +378,7 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <RefreshCw className="size-3.5" />
-                重试
+                {recoverable ? "继续查询" : "重试"}
             </button>
         </div>
     );

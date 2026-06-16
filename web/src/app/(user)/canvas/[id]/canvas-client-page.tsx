@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
+import { isImageTaskPollingError, requestEdit, requestGeneration, requestImageQuestion, resumeImageTask } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
@@ -2064,6 +2064,7 @@ function InfiniteCanvasPage() {
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
                     let hasSuccess = false;
                     let hasFailure = false;
+                    let recoverableTaskId: string | undefined;
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
@@ -2101,9 +2102,11 @@ function InfiniteCanvasPage() {
                                 return true;
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
-                                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                                const taskId = isImageTaskPollingError(error) ? error.taskId : undefined;
+                                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务 ID：${taskId}` : error.message) : "生成失败";
                                 hasFailure = true;
-                                setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
+                                if (taskId) recoverableTaskId ||= taskId;
+                                setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: Boolean(taskId) } } : node)));
                             } finally {
                                 finishGenerationRequest(targetId, controller);
                             }
@@ -2119,11 +2122,11 @@ function InfiniteCanvasPage() {
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                 : node.id === nodeId && isEmptyImageNode
-                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : "全部图片生成失败" } }
+                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                   : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: "全部图片生成失败" } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: recoverableTaskId, asyncTaskRecoverable: Boolean(recoverableTaskId) } }
                                     : node,
                         ),
                     );
@@ -2276,6 +2279,42 @@ function InfiniteCanvasPage() {
                 return;
             }
 
+            if (node.type === CanvasNodeType.Image && node.metadata?.asyncTaskId) {
+                const taskId = node.metadata.asyncTaskId;
+                setRunningNodeId(node.id);
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+                const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
+                try {
+                    const image = await resumeImageTask(generationConfig, taskId, { signal: controller.signal }).then((items) => items[0]);
+                    const uploadedImage = await uploadImage(image.dataUrl);
+                    const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
+                    setNodes((prev) =>
+                        prev.map((item) =>
+                            item.id === node.id
+                                ? {
+                                      ...item,
+                                      type: CanvasNodeType.Image,
+                                      width: imageSize.width,
+                                      height: imageSize.height,
+                                      metadata: { ...item.metadata, ...imageMetadata(uploadedImage), asyncTaskId: undefined, asyncTaskRecoverable: undefined, errorDetails: undefined },
+                                  }
+                                : item,
+                        ),
+                    );
+                    return;
+                } catch (error) {
+                    if (isGenerationCanceled(error)) return;
+                    const errorDetails = error instanceof Error ? `${error.message}。任务 ID：${taskId}` : `继续查询失败。任务 ID：${taskId}`;
+                    message.error(errorDetails);
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item)));
+                    return;
+                } finally {
+                    finishGenerationRequest(node.id, controller);
+                    setRunningNodeId(null);
+                }
+            }
+
             const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
             if (!prompt) {
@@ -2342,9 +2381,10 @@ function InfiniteCanvasPage() {
                 );
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                const taskId = isImageTaskPollingError(error) ? error.taskId : undefined;
+                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务 ID：${taskId}` : error.message) : "生成失败";
                 message.error(errorDetails);
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: Boolean(taskId) } } : item)));
             } finally {
                 finishGenerationRequest(node.id, controller);
                 setRunningNodeId(null);
@@ -2988,7 +3028,7 @@ function audioExtension(mimeType?: string) {
 }
 
 function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
-    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
+    return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, asyncTaskId: undefined, asyncTaskRecoverable: undefined, errorDetails: undefined };
 }
 
 function videoMetadata(video: UploadedFile): CanvasNodeMetadata {

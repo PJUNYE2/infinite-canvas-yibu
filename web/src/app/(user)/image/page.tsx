@@ -583,15 +583,15 @@ function PendingImageCard() {
 
 function FailedImageCard({ error, taskId, recoverable, onResume, onRetry }: { error: string; taskId?: string; recoverable?: boolean; onResume?: () => void; onRetry: () => void }) {
     return (
-        <div className={`overflow-hidden rounded-lg border ${recoverable ? "border-amber-200 bg-amber-50 dark:border-amber-950 dark:bg-amber-950/20" : "border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20"}`}>
+        <div className={`overflow-hidden rounded-lg border ${recoverable ? "border-green-200 bg-green-50 dark:border-green-950 dark:bg-green-950/20" : "border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20"}`}>
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className={`text-sm font-medium ${recoverable ? "text-amber-700 dark:text-amber-300" : "text-red-600 dark:text-red-300"}`}>{recoverable ? "任务已提交" : "生成失败"}</div>
-                <Typography.Paragraph ellipsis={{ rows: 4 }} className={`!mb-0 !text-xs ${recoverable ? "!text-amber-700 dark:!text-amber-300" : "!text-red-500 dark:!text-red-300"}`}>
+                <div className={`text-sm font-medium ${recoverable ? "text-green-700 dark:text-green-300" : "text-red-600 dark:text-red-300"}`}>{recoverable ? "任务已提交" : "生成失败"}</div>
+                <Typography.Paragraph ellipsis={{ rows: 4 }} className={`!mb-0 !text-xs ${recoverable ? "!text-green-700 dark:!text-green-300" : "!text-red-500 dark:!text-red-300"}`}>
                     {error}
                 </Typography.Paragraph>
                 {taskId ? <div className="max-w-full truncate rounded bg-black/5 px-2 py-1 font-mono text-[11px] text-stone-500 dark:bg-white/10 dark:text-stone-300">{taskId}</div> : null}
             </div>
-            <div className={`flex justify-end gap-2 border-t p-3 ${recoverable ? "border-amber-200 dark:border-amber-950" : "border-red-200 dark:border-red-950"}`}>
+            <div className={`flex justify-end gap-2 border-t p-3 ${recoverable ? "border-green-200 dark:border-green-950" : "border-red-200 dark:border-red-950"}`}>
                 {recoverable && onResume ? (
                     <Button size="small" type="primary" onClick={onResume}>
                         继续查询

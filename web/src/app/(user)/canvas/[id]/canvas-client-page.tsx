@@ -2122,11 +2122,11 @@ function InfiniteCanvasPage() {
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                 : node.id === nodeId && isEmptyImageNode
-                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
+                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                   : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: recoverableTaskId, asyncTaskRecoverable: Boolean(recoverableTaskId) } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: recoverableTaskId ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: recoverableTaskId, asyncTaskRecoverable: Boolean(recoverableTaskId) } }
                                     : node,
                         ),
                     );

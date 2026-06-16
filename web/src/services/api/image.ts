@@ -381,7 +381,7 @@ async function pollSubmittedImageTask(config: AiConfig, taskId: string, expected
         return await pollImageTask(config, taskId, expectedCount, options);
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
-        throw new ImageTaskPollingError(taskId, "任务已提交成功，网络出现波动，点击按钮查询结果");
+        throw new ImageTaskPollingError(taskId, "生图任务进行中，可等待3-5分钟后点击按钮查询图片");
     }
 }
 

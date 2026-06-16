@@ -2103,7 +2103,7 @@ function InfiniteCanvasPage() {
                             } catch (error) {
                                 if (isGenerationCanceled(error)) return false;
                                 const taskId = isImageTaskPollingError(error) ? error.taskId : undefined;
-                                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务 ID：${taskId}` : error.message) : "生成失败";
+                                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务ID:${taskId}` : error.message) : "生成失败";
                                 hasFailure = true;
                                 if (taskId) recoverableTaskId ||= taskId;
                                 setNodes((prev) => prev.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: Boolean(taskId) } } : node)));
@@ -2122,11 +2122,11 @@ function InfiniteCanvasPage() {
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
-                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
+                                ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                 : node.id === nodeId && isEmptyImageNode
-                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
+                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: hasSuccess ? undefined : recoverableTaskId, asyncTaskRecoverable: !hasSuccess && Boolean(recoverableTaskId) } }
                                   : node.id === rootId && !hasSuccess
-                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: recoverableTaskId ? `任务已提交，但轮询结果失败，可稍后继续查询。任务 ID：${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: recoverableTaskId, asyncTaskRecoverable: Boolean(recoverableTaskId) } }
+                                    ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: recoverableTaskId ? `任务已提交成功，网络出现波动，点击按钮查询结果。任务ID:${recoverableTaskId}` : "全部图片生成失败", asyncTaskId: recoverableTaskId, asyncTaskRecoverable: Boolean(recoverableTaskId) } }
                                     : node,
                         ),
                     );
@@ -2305,7 +2305,7 @@ function InfiniteCanvasPage() {
                     return;
                 } catch (error) {
                     if (isGenerationCanceled(error)) return;
-                    const errorDetails = error instanceof Error ? `${error.message}。任务 ID：${taskId}` : `继续查询失败。任务 ID：${taskId}`;
+                    const errorDetails = error instanceof Error ? `${error.message}。任务ID:${taskId}` : `继续查询失败。任务ID:${taskId}`;
                     message.error(errorDetails);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item)));
                     return;
@@ -2382,7 +2382,7 @@ function InfiniteCanvasPage() {
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const taskId = isImageTaskPollingError(error) ? error.taskId : undefined;
-                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务 ID：${taskId}` : error.message) : "生成失败";
+                const errorDetails = error instanceof Error ? (taskId ? `${error.message}。任务ID:${taskId}` : error.message) : "生成失败";
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: Boolean(taskId) } } : item)));
             } finally {

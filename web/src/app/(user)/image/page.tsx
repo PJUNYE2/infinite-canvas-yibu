@@ -299,7 +299,7 @@ export default function ImagePage() {
             return await applyGeneratedImage(index, result[0], itemStartedAt);
         } catch (error) {
             if (isImageTaskPollingError(error)) {
-                setResults((value) => updateResultAt(value, index, { status: "failed", taskId: error.taskId, recoverable: true, error: `${error.message}。任务 ID：${error.taskId}` }));
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId: error.taskId, recoverable: true, error: `${error.message}。任务ID:${error.taskId}` }));
             } else {
                 setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败", recoverable: false }));
             }
@@ -324,7 +324,7 @@ export default function ImagePage() {
         void resumeImageTask(snapshot.config, taskId)
             .then((items) => applyGeneratedImage(index, items[0], itemStartedAt))
             .catch((error) => {
-                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: error instanceof Error ? `${error.message}。任务 ID：${taskId}` : `继续查询失败。任务 ID：${taskId}` }));
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: error instanceof Error ? `${error.message}。任务ID:${taskId}` : `继续查询失败。任务ID:${taskId}` }));
             });
     };
 

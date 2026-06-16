@@ -176,6 +176,77 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
 }
 
+function isBananaImageModel(model: string) {
+    const value = model.trim().toLowerCase();
+    return value.includes("gemini-3-pro-image-preview") || value.includes("gemini-3.1-flash-image-preview") || value.includes("nano-banana") || value.includes("banana");
+}
+
+function resolveBananaQuality(quality: string) {
+    const value = quality.trim().toLowerCase();
+    if (!value || value === "auto") return undefined;
+    if (value === "1k") return "1K";
+    if (value === "2k") return "2K";
+    if (value === "4k") return "4K";
+    if (value === "low" || value === "standard") return "1K";
+    if (value === "medium" || value === "hd") return "2K";
+    if (value === "high") return "4K";
+    return undefined;
+}
+
+function resolveBananaAspectRatio(size: string) {
+    const value = size.trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    if (value.includes(":")) {
+        parseImageRatio(value);
+        return value;
+    }
+    const dimensions = parseImageDimensions(value);
+    if (!dimensions) throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
+    validateImageSize(dimensions.width, dimensions.height);
+    const divisor = gcd(dimensions.width, dimensions.height);
+    return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y) {
+        const next = x % y;
+        x = y;
+        y = next;
+    }
+    return x || 1;
+}
+
+type BananaAsyncPayload = {
+    model: string;
+    prompt: string;
+    image?: string | string[];
+    size?: string;
+    quality?: string;
+    n: number;
+    extra_body?: { google: { image_config: { aspect_ratio?: string; image_size: string } } };
+};
+
+function buildBananaAsyncPayload(config: AiConfig, prompt: string, images?: string[]): BananaAsyncPayload {
+    const quality = resolveBananaQuality(config.quality);
+    const aspectRatio = resolveBananaAspectRatio(config.size);
+    return {
+        model: config.model,
+        prompt: withSystemPrompt(config, prompt),
+        ...(images?.length ? { image: images.length === 1 ? images[0] : images } : {}),
+        ...(aspectRatio ? { size: aspectRatio } : {}),
+        ...(quality ? { quality: quality === "4K" ? "2K" : quality } : {}),
+        n: 1,
+        ...(quality === "4K" ? { extra_body: { google: { image_config: { ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}), image_size: "4K" } } } } : {}),
+    };
+}
+
+async function submitBananaAsyncTask(config: AiConfig, prompt: string, images: string[] | undefined, options?: RequestOptions) {
+    const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(config, "/images/generations/async"), buildBananaAsyncPayload(config, prompt, images), { headers: aiHeaders(config, "application/json"), signal: options?.signal });
+    return await pollImageTask(config, resolveTaskId(response.data), 1, options);
+}
+
 function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
         return `data:image/png;base64,${item.b64_json}`;
@@ -497,6 +568,13 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    if (isBananaImageModel(requestConfig.model)) {
+        try {
+            return await submitBananaAsyncTask(requestConfig, prompt, undefined, options);
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const formData = new FormData();
@@ -521,9 +599,17 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
+    const requestPrompt = buildImageReferencePromptText(prompt, references);
+    if (isBananaImageModel(requestConfig.model)) {
+        try {
+            const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+            return await submitBananaAsyncTask(requestConfig, requestPrompt, images, options);
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
-    const requestPrompt = buildImageReferencePromptText(prompt, references);
     const formData = new FormData();
     formData.set("model", requestConfig.model);
     formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));

@@ -324,7 +324,8 @@ export default function ImagePage() {
         void resumeImageTask(snapshot.config, taskId)
             .then((items) => applyGeneratedImage(index, items[0], itemStartedAt))
             .catch((error) => {
-                setResults((value) => updateResultAt(value, index, { status: "failed", taskId, recoverable: true, error: `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}` }));
+                const recoverable = isImageTaskPollingError(error);
+                setResults((value) => updateResultAt(value, index, { status: "failed", taskId: recoverable ? taskId : undefined, recoverable, error: recoverable ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}` : error instanceof Error ? error.message : "查询失败" }));
             });
     };
 

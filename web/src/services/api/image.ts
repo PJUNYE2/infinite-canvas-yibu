@@ -102,6 +102,13 @@ export function isImageTaskPollingError(error: unknown): error is ImageTaskPolli
     return error instanceof ImageTaskPollingError || Boolean(error && typeof error === "object" && "taskId" in error);
 }
 
+class ImageTaskPermanentError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "ImageTaskPermanentError";
+    }
+}
+
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
     medium: 2048,
@@ -372,7 +379,7 @@ function resolveTaskResultUrl(config: AiConfig, url: string) {
 
 async function fetchProtectedImageDataUrl(config: AiConfig, url: string, options?: RequestOptions) {
     const response = await fetch(resolveTaskResultUrl(config, url), { headers: aiHeaders(config), signal: options?.signal });
-    if (!response.ok) throw new Error(await readFetchError(response, "获取图片结果失败"));
+    if (!response.ok) throw new ImageTaskPermanentError(await readFetchError(response, "获取图片结果失败"));
     return await blobToDataUrl(await response.blob());
 }
 
@@ -381,6 +388,8 @@ async function pollSubmittedImageTask(config: AiConfig, taskId: string, expected
         return await pollImageTask(config, taskId, expectedCount, options);
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
+        if (error instanceof ImageTaskPermanentError) throw error;
+        if (axios.isAxiosError(error) && error.response) throw new ImageTaskPermanentError(readAxiosError(error, "任务查询失败"));
         throw new ImageTaskPollingError(taskId, "生图任务进行中，可等待3-5分钟后点击按钮查询图片");
     }
 }
@@ -397,7 +406,7 @@ async function pollImageTask(config: AiConfig, taskId: string, expectedCount: nu
         const response = await axios.get<ImageAsyncTaskResponse>(aiApiUrl(config, `/images/tasks/${encodeURIComponent(taskId)}`), { headers: aiHeaders(config), signal: options?.signal });
         const task = unwrapTaskPayload(response.data);
         const status = normalizeTaskStatus(task.status);
-        if (status === "FAILURE" || status === "FAILED" || status === "ERROR") throw new Error(stringValue(task.fail_reason) || task.message || task.msg || "图片生成失败");
+        if (status === "FAILURE" || status === "FAILED" || status === "ERROR") throw new ImageTaskPermanentError(stringValue(task.fail_reason) || task.message || task.msg || "图片生成失败");
         if (status === "SUCCESS" || status === "SUCCEEDED" || status === "COMPLETED" || status === "DONE") {
             const inlineImages = resolveTaskInlineImages(task);
             const urls = resolveTaskResultUrls(task);

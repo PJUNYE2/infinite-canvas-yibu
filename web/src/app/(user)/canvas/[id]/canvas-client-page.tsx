@@ -2305,9 +2305,10 @@ function InfiniteCanvasPage() {
                     return;
                 } catch (error) {
                     if (isGenerationCanceled(error)) return;
-                    const errorDetails = `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}`;
+                    const recoverable = isImageTaskPollingError(error);
+                    const errorDetails = recoverable ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}` : error instanceof Error ? error.message : "查询失败";
                     message.error(errorDetails);
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item)));
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails, asyncTaskId: recoverable ? taskId : undefined, asyncTaskRecoverable: recoverable } } : item)));
                     return;
                 } finally {
                     finishGenerationRequest(node.id, controller);

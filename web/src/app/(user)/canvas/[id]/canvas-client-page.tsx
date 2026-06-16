@@ -3179,7 +3179,19 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
 }
 
 function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
-    return nodes.map((node) => (node.metadata?.status === "loading" ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: "页面刷新后生成已中断，请重新生成。" } } : node));
+    return nodes.map((node) => {
+        if (node.metadata?.status !== "loading") return node;
+        const taskId = node.metadata.asyncTaskId;
+        return {
+            ...node,
+            metadata: {
+                ...node.metadata,
+                status: "error" as const,
+                errorDetails: taskId ? `生图任务进行中，可等待3-5分钟后点击按钮查询图片。任务ID:${taskId}` : "页面刷新后生成已中断，请重新生成。",
+                asyncTaskRecoverable: Boolean(taskId),
+            },
+        };
+    });
 }
 
 function isGenerationCanceled(error: unknown) {

@@ -146,6 +146,30 @@ export function AppConfigModal() {
         if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
     };
 
+    const autoDetectModels = () => {
+        const models = uniqueModels(config.models);
+        if (!models.length) {
+            message.warning("请先到渠道中填写或拉取模型列表");
+            return;
+        }
+        const imageModels = filterModelsByCapability(models, "image");
+        const videoModels = filterModelsByCapability(models, "video");
+        const textModels = filterModelsByCapability(models, "text");
+        const audioModels = filterModelsByCapability(models, "audio");
+        saveConfig({
+            ...config,
+            imageModels,
+            videoModels,
+            textModels,
+            audioModels,
+            imageModel: normalizeDefaultModel(config.imageModel, imageModels),
+            videoModel: normalizeDefaultModel(config.videoModel, videoModels),
+            textModel: normalizeDefaultModel(config.textModel, textModels),
+            audioModel: normalizeDefaultModel(config.audioModel, audioModels),
+        });
+        message.success(`已自动识别：生图 ${imageModels.length}，视频 ${videoModels.length}，文本 ${textModels.length}，音频 ${audioModels.length}`);
+    };
+
     const testWebdav = async () => {
         if (!webdavReady) {
             message.error("请先填写 WebDAV 地址");
@@ -279,9 +303,14 @@ export function AppConfigModal() {
                         label: "模型",
                         children: (
                             <Form layout="vertical" requiredMark={false}>
-                                <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
-                                    <div className="text-sm font-semibold">默认模型和可选项</div>
-                                    <div className="mt-1 text-xs leading-5 text-stone-500">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                    <div>
+                                        <div className="text-sm font-semibold">默认模型和可选项</div>
+                                        <div className="mt-1 text-xs leading-5 text-stone-500">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                    </div>
+                                    <Button type="primary" icon={<RefreshCw className="size-4" />} onClick={autoDetectModels}>
+                                        自动识别
+                                    </Button>
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
                                     {modelGroups.map((group) => (

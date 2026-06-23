@@ -1710,7 +1710,7 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
+                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal, onTaskCreated: (taskId) => setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item))) }).then((items) => items[0]);
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
@@ -1786,7 +1786,7 @@ function InfiniteCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }], undefined, { signal: controller.signal }).then(
+                const image = await requestEdit(generationConfig, prompt, [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }], undefined, { signal: controller.signal, onTaskCreated: (taskId) => setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item))) }).then(
                     (items) => items[0],
                 );
                 const uploaded = await uploadImage(image.dataUrl);
@@ -2065,12 +2065,26 @@ function InfiniteCanvasPage() {
                     let hasSuccess = false;
                     let hasFailure = false;
                     let recoverableTaskId: string | undefined;
+                    const saveTaskId = (targetId: string, taskId: string) => {
+                        recoverableTaskId ||= taskId;
+                        setNodes((prev) =>
+                            prev.map((node) =>
+                                node.id === targetId
+                                    ? {
+                                          ...node,
+                                          metadata: { ...node.metadata, asyncTaskId: taskId, asyncTaskRecoverable: true },
+                                      }
+                                    : node,
+                            ),
+                        );
+                    };
                     await Promise.all(
                         targetIds.map(async (targetId) => {
                             try {
+                                const requestOptions = { signal: controller.signal, onTaskCreated: (taskId: string) => saveTaskId(targetId, taskId) };
                                 const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, requestOptions).then((items) => items[0])
+                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, requestOptions).then((items) => items[0]);
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
@@ -2360,7 +2374,11 @@ function InfiniteCanvasPage() {
                     return;
                 }
 
-                const image = useReferenceImages ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0]) : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                const requestOptions = {
+                    signal: controller.signal,
+                    onTaskCreated: (taskId: string) => setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, asyncTaskId: taskId, asyncTaskRecoverable: true } } : item))),
+                };
+                const image = useReferenceImages ? await requestEdit(generationConfig, prompt, retryImages, undefined, requestOptions).then((items) => items[0]) : await requestGeneration(generationConfig, prompt, requestOptions).then((items) => items[0]);
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);

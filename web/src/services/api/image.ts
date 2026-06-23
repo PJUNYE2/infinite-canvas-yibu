@@ -86,7 +86,7 @@ type ImageAsyncTaskResponse = {
     message?: string;
     msg?: string;
 };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; onTaskCreated?: (taskId: string) => void };
 
 export class ImageTaskPollingError extends Error {
     taskId: string;
@@ -266,6 +266,7 @@ function buildBananaAsyncPayload(config: AiConfig, prompt: string, images?: stri
 async function submitBananaAsyncTask(config: AiConfig, prompt: string, images: string[] | undefined, options?: RequestOptions) {
     const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(config, "/images/generations/async"), buildBananaAsyncPayload(config, prompt, images), { headers: aiHeaders(config, "application/json"), signal: options?.signal });
     const taskId = resolveTaskId(response.data);
+    options?.onTaskCreated?.(taskId);
     return await pollSubmittedImageTask(config, taskId, 1, options);
 }
 
@@ -630,6 +631,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     try {
         const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const taskId = resolveTaskId(response.data);
+        options?.onTaskCreated?.(taskId);
         return await pollSubmittedImageTask(requestConfig, taskId, n, options);
     } catch (error) {
         if (isImageTaskPollingError(error)) throw error;
@@ -672,6 +674,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     try {
         const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
         const taskId = resolveTaskId(response.data);
+        options?.onTaskCreated?.(taskId);
         return await pollSubmittedImageTask(requestConfig, taskId, n, options);
     } catch (error) {
         if (isImageTaskPollingError(error)) throw error;

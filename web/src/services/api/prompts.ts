@@ -34,7 +34,7 @@ const youMindGptImage2RawBase = "https://raw.githubusercontent.com/YouMind-OpenL
 const youMindNanoBananaProRawBase = "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-nano-banana-pro-prompts/main";
 const davidWuGptImage2RawBase = "https://raw.githubusercontent.com/davidwuw0811-boop/awesome-gpt-image2-prompts/main";
 const cacheTtlMs = 1000 * 60 * 60;
-const promptCacheKey = "third-party-prompts";
+const promptCacheKey = "third-party-prompts-v2";
 const promptCacheStore = localforage.createInstance({ name: "infinite-canvas", storeName: "prompt_cache" });
 
 const categories: PromptCategory[] = [
@@ -187,13 +187,28 @@ function firstMatch(value: string, pattern: RegExp) {
 }
 
 function extractMarkdownImages(baseUrl: string, markdown: string) {
-    return Array.from(markdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g), (match) => absoluteImage(baseUrl, match[1])).filter(Boolean);
+    const markdownImages = Array.from(markdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g), (match) => match[1]);
+    const htmlImages = Array.from(markdown.matchAll(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi), (match) => match[1]);
+    return [...markdownImages, ...htmlImages]
+        .map((image) => absoluteImage(baseUrl, image))
+        .filter((image) => Boolean(image) && isPromptPreviewImage(image));
+}
+
+function isPromptPreviewImage(image: string) {
+    const value = image.toLowerCase();
+    if (value.includes("img.shields.io/")) return false;
+    if (value.includes("awesome.re/badge")) return false;
+    if (value.includes("/badge.svg") || value.includes("/badge/")) return false;
+    if (value.includes("github.com/") && value.includes("/actions/workflows/") && value.includes("/badge.svg")) return false;
+    if (value.includes("atomgit.com/") && value.includes("/star/badge")) return false;
+    return true;
 }
 
 function absoluteImage(baseUrl: string, image: string) {
-    if (!image) return "";
-    if (/^https?:\/\//i.test(image)) return image;
-    return `${baseUrl}/${image.replace(/^\.?\//, "")}`;
+    const cleanImage = image.trim();
+    if (!cleanImage) return "";
+    if (/^https?:\/\//i.test(cleanImage)) return cleanImage;
+    return `${baseUrl}/${cleanImage.replace(/^\.?\//, "")}`;
 }
 
 function tagsFromCategory(category: string) {

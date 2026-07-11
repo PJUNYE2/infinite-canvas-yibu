@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Button, Card, Tag } from "antd";
 
 import { formatPromptDate, type Prompt } from "@/services/api/prompts";
-import { PromptImage } from "@/components/prompts/prompt-image";
 
 export function PromptCard({
     item,
@@ -29,7 +28,7 @@ export function PromptCard({
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>
-                    <PromptImage src={item.coverUrl} alt={item.title} className="aspect-[4/3] w-full object-cover" />
+                    <img src={item.coverUrl} alt={item.title} className="aspect-[4/3] w-full object-cover" />
                 </button>
             }
         >

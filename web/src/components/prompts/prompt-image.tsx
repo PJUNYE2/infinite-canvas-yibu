@@ -5,9 +5,8 @@ function proxiedImageUrl(url: string) {
     if (!url || url.startsWith("data:")) return url;
     try {
         const parsed = new URL(url);
-        if (typeof window === "undefined") return url;
-        if (parsed.origin === window.location.origin) return url;
-        return `/api/image-proxy?url=${encodeURIComponent(parsed.toString())}`;
+        if (parsed.hostname.includes("images.weserv.nl")) return url;
+        return `https://images.weserv.nl/?url=${encodeURIComponent(parsed.toString())}`;
     } catch {
         return url;
     }
@@ -18,7 +17,7 @@ export function PromptImage({ src, alt, className }: { src?: string; alt: string
         const value = src?.trim();
         if (!value) return [];
         const proxy = proxiedImageUrl(value);
-        return Array.from(new Set([proxy, value].filter(Boolean)));
+        return Array.from(new Set([value, proxy].filter(Boolean)));
     }, [src]);
     const [index, setIndex] = useState(0);
 

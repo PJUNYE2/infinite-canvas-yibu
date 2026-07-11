@@ -47,7 +47,6 @@
         "@types/node": "^20",
         "@types/react": "19.1.12",
         "@types/react-dom": "19.1.9",
-        "@vercel/node": "^5.8.23",
         "@vitejs/plugin-react": "^5.2.0",
         "prettier": "^3.8.3",
         "typescript": "^5",

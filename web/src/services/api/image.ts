@@ -87,7 +87,6 @@ type ImageAsyncTaskResponse = {
     message?: string;
     msg?: string;
 };
-<<<<<<< HEAD
 type GeminiPart = {
     text?: string;
     inlineData?: { mimeType?: string; data?: string };

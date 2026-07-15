@@ -9,3 +9,6 @@ data/
 .DS_Store
 .idea
 web/dist
+
+**/dist
+web/public/plugins

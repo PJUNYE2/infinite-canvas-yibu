@@ -9,8 +9,15 @@ export type PromptSource = {
     builtIn: boolean;
 };
 
-export const PROMPT_REGISTRY_HOMEPAGE = "https://github.com/yukkcat/image-prompts";
-const PROMPT_REGISTRY_SOURCE_BASE = "https://raw.githubusercontent.com/yukkcat/image-prompts/main/dist/sources";
+export const GITHUB_MIRROR_PREFIX = "https://mirrors.ysw6.eu.org/";
+export const PROMPT_REGISTRY_HOMEPAGE = `${GITHUB_MIRROR_PREFIX}https://github.com/yukkcat/image-prompts`;
+const PROMPT_REGISTRY_SOURCE_BASE = `${GITHUB_MIRROR_PREFIX}https://raw.githubusercontent.com/yukkcat/image-prompts/main/dist/sources`;
+
+export function withGithubMirror(url: string) {
+    const value = url.trim();
+    if (!value || value.startsWith(GITHUB_MIRROR_PREFIX)) return value;
+    return /^https:\/\/(?:github\.com|raw\.githubusercontent\.com)\//i.test(value) ? `${GITHUB_MIRROR_PREFIX}${value}` : value;
+}
 
 export function createPromptSource(source?: Partial<PromptSource>): PromptSource {
     return {
@@ -33,5 +40,5 @@ export const DEFAULT_PROMPT_SOURCES: PromptSource[] = [
 ];
 
 function registrySource(id: string, name: string, homepage: string): PromptSource {
-    return { id, name, url: `${PROMPT_REGISTRY_SOURCE_BASE}/${id}.json`, homepage, enabled: true, builtIn: true };
+    return { id, name, url: `${PROMPT_REGISTRY_SOURCE_BASE}/${id}.json`, homepage: withGithubMirror(homepage), enabled: true, builtIn: true };
 }

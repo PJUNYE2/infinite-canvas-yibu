@@ -33,8 +33,14 @@ export function usePromptSourceScheduler() {
                 running = false;
             }
         };
-        void tick();
-        const timer = window.setInterval(() => void tick(), CHECK_INTERVAL_MS);
-        return () => window.clearInterval(timer);
+        const start = () => void tick();
+        const canIdle = typeof window.requestIdleCallback === "function";
+        const idleId = canIdle ? window.requestIdleCallback(start, { timeout: 8_000 }) : (globalThis.setTimeout(start, 3_000) as unknown as number);
+        const timer = window.setInterval(start, CHECK_INTERVAL_MS);
+        return () => {
+            window.clearInterval(timer);
+            if (canIdle) window.cancelIdleCallback(idleId);
+            else globalThis.clearTimeout(idleId);
+        };
     }, [intervalMinutes, queryClient]);
 }

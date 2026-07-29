@@ -2,7 +2,7 @@ import localforage from "localforage";
 
 import { runPromptSource, type RawPrompt } from "./prompt-source-runtime";
 import { usePromptSourceStore } from "@/stores/use-prompt-source-store";
-import type { PromptSource } from "./prompt-source-presets";
+import { withGithubMirror, type PromptSource } from "./prompt-source-presets";
 
 export type Prompt = RawPrompt & {
     sourceId: string;
@@ -70,7 +70,7 @@ function withSourceMeta(source: PromptSource, items: RawPrompt[]): Prompt[] {
         referenceImageUrls: Array.isArray(item.referenceImageUrls) ? item.referenceImageUrls : [],
         sourceId: source.id,
         category: source.name,
-        githubUrl: item.sourceUrl || source.homepage,
+        githubUrl: source.builtIn ? withGithubMirror(item.sourceUrl || source.homepage) : item.sourceUrl || source.homepage,
     }));
 }
 

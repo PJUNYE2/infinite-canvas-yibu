@@ -63,29 +63,11 @@ function sourceSignature(source: PromptSource) {
     return `${value.length}:${hash}`;
 }
 
-function rawGithubImageToJsDelivr(url: string) {
-    try {
-        const parsed = new URL(url);
-        if (parsed.hostname.toLowerCase() !== "raw.githubusercontent.com") return url;
-        const parts = parsed.pathname.split("/").filter(Boolean);
-        if (parts.length < 4) return url;
-        const [owner, repo] = parts;
-        const usesFullRef = parts[2] === "refs" && (parts[3] === "heads" || parts[3] === "tags") && parts.length >= 6;
-        const ref = usesFullRef ? parts[4] : parts[2];
-        const path = parts.slice(usesFullRef ? 5 : 3);
-        if (!owner || !repo || !ref || !path.length) return url;
-        return `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path.join("/")}`;
-    } catch {
-        return url;
-    }
-}
-
 function withSourceMeta(source: PromptSource, items: RawPrompt[]): Prompt[] {
     return items.map((item) => ({
         ...item,
         description: item.description || "",
-        coverUrl: rawGithubImageToJsDelivr(item.coverUrl || ""),
-        referenceImageUrls: Array.isArray(item.referenceImageUrls) ? item.referenceImageUrls.map(rawGithubImageToJsDelivr) : [],
+        referenceImageUrls: Array.isArray(item.referenceImageUrls) ? item.referenceImageUrls : [],
         sourceId: source.id,
         category: source.name,
         githubUrl: source.builtIn ? withGithubMirror(item.sourceUrl || source.homepage) : item.sourceUrl || source.homepage,

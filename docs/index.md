@@ -27,8 +27,7 @@
 ## 支持与安全
 
 - [漏洞提交](/docs/support/security)
-- [打赏支持](/docs/support/donate)
-- [广告赞助](/docs/support/sponsor)
+- [赞助支持](/docs/support/sponsor)
 
 ## 项目进度
 
@@ -43,4 +42,4 @@
 
 ## 原理说明
 
-- [本地 Codex 连接画布原理](/docs/overview/local-codex-canvas)
+- [本地 Codex 连接画布原理](/docs/development/local-codex-canvas)

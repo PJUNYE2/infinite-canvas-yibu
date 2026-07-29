@@ -71,6 +71,7 @@ const logStore = localforage.createInstance({ name: "infinite-canvas", storeName
 export default function ImagePage() {
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const dragDepthRef = useRef(0);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -91,10 +92,13 @@ export default function ImagePage() {
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     const [previewLog, setPreviewLog] = useState<GenerationLog | null>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [isReferenceDragActive, setIsReferenceDragActive] = useState(false);
     const [autoRunToken, setAutoRunToken] = useState(0);
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
+    const updateAgentTask = useWorkbenchAgentStore((state) => state.updateTask);
     const processedCommandRef = useRef(0);
+    const agentTaskIdRef = useRef<string | undefined>(undefined);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const canGenerate = Boolean(prompt.trim());
@@ -143,22 +147,30 @@ export default function ImagePage() {
     };
 
     const generate = async () => {
+        const agentTaskId = agentTaskIdRef.current;
+        agentTaskIdRef.current = undefined;
         const text = prompt.trim();
         if (!text) {
             message.error("请输入生图提示词");
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: "请输入生图提示词" });
             return;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
             message.warning("请先完成配置");
             openConfigDialog(true);
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: "生图配置不完整" });
             return;
         }
 
         const snapshot = buildRequestSnapshot();
-        if (!snapshot) return;
+        if (!snapshot) {
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: "生图参数无效" });
+            return;
+        }
 
         setElapsedMs(0);
         setRunning(true);
+        if (agentTaskId) updateAgentTask(agentTaskId, { status: "running", error: undefined });
         setPreviewLog(null);
         setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
         const batchStartedAt = performance.now();
@@ -171,6 +183,8 @@ export default function ImagePage() {
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
+        const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? "生成失败" : undefined;
+        if (agentTaskId) updateAgentTask(agentTaskId, { status: successCount ? "succeeded" : "failed", successCount, failCount, error: successCount ? undefined : error });
 
         try {
             const logImages = await Promise.all(
@@ -204,8 +218,15 @@ export default function ImagePage() {
         processedCommandRef.current = imageCommand.nonce;
         clearImageCommand();
         if (typeof imageCommand.prompt === "string") setPrompt(imageCommand.prompt);
-        if (imageCommand.run && !running) setAutoRunToken((value) => value + 1);
-    }, [imageCommand, clearImageCommand, running]);
+        if (imageCommand.run && running) {
+            if (imageCommand.taskId) updateAgentTask(imageCommand.taskId, { status: "failed", error: "生图工作台已有任务正在运行" });
+            return;
+        }
+        if (imageCommand.run) {
+            agentTaskIdRef.current = imageCommand.taskId;
+            setAutoRunToken((value) => value + 1);
+        }
+    }, [imageCommand, clearImageCommand, running, updateAgentTask]);
 
     useEffect(() => {
         if (!autoRunToken) return;
@@ -234,7 +255,7 @@ export default function ImagePage() {
             data: { dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType },
             metadata: { source: "image-page", prompt },
         });
-        message.success("已加入我的素材");
+        message.success("已加入我的资产");
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
@@ -244,7 +265,7 @@ export default function ImagePage() {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         } else {
-            message.warning("生图工作台只能使用文本或图片素材");
+            message.warning("生图工作台只能使用文本或图片资产");
         }
         setAssetPickerOpen(false);
     };
@@ -411,7 +432,7 @@ export default function ImagePage() {
                                             查看提示词库
                                         </Button>
                                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
+                                            查看我的资产
                                         </Button>
                                     </div>
                                 </div>
@@ -431,7 +452,27 @@ export default function ImagePage() {
                                     </div>
                                 </div>
                                 <div
-                                    className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700"
+                                    className={`hover-scrollbar hover-scrollbar-hint relative flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${isReferenceDragActive ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    onDragEnter={(event) => {
+                                        event.preventDefault();
+                                        dragDepthRef.current += 1;
+                                        if (event.dataTransfer.types.includes("Files")) setIsReferenceDragActive(true);
+                                    }}
+                                    onDragOver={(event) => {
+                                        event.preventDefault();
+                                        event.dataTransfer.dropEffect = "copy";
+                                    }}
+                                    onDragLeave={(event) => {
+                                        event.preventDefault();
+                                        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+                                        if (!dragDepthRef.current) setIsReferenceDragActive(false);
+                                    }}
+                                    onDrop={(event) => {
+                                        event.preventDefault();
+                                        dragDepthRef.current = 0;
+                                        setIsReferenceDragActive(false);
+                                        void addReferences(event.dataTransfer.files);
+                                    }}
                                     onWheel={(event) => {
                                         if (event.currentTarget.scrollWidth <= event.currentTarget.clientWidth) return;
                                         event.preventDefault();
@@ -453,7 +494,7 @@ export default function ImagePage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">暂无参考图</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{isReferenceDragActive ? "松开即可添加参考图" : "暂无参考图，可将图片拖到这里"}</div> : null}
                                 </div>
                             </div>
 
@@ -583,9 +624,9 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="grid min-w-0 grid-cols-3 gap-2">
-                    <Tooltip title="添加到素材">
+                    <Tooltip title="添加到资产">
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
-                            添加到素材
+                            添加到资产
                         </Button>
                     </Tooltip>
                     <Tooltip title="加入参考图">

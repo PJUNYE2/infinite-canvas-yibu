@@ -1,6 +1,7 @@
 import axios from "axios";
 
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -109,7 +110,6 @@ type RequestOptions = { signal?: AbortSignal; onTaskCreated?: (taskId: string) =
 
 export class ImageTaskPollingError extends Error {
     taskId: string;
-
     constructor(taskId: string, message: string) {
         super(message);
         this.name = "ImageTaskPollingError";
@@ -155,6 +155,62 @@ function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
     const normalized = QUALITY_ALIASES[value] || value;
     return QUALITY_BASE[normalized] ? normalized : undefined;
+}
+
+/** Only "transparent" is forwarded; any other value (incl. empty) means keep the default opaque background. */
+function normalizeBackground(background: string | undefined) {
+    return background?.trim().toLowerCase() === "transparent" ? "transparent" : undefined;
+}
+
+function isBananaImageModel(model: string) {
+    const value = model.trim().toLowerCase();
+    return value.includes("gemini-3-pro-image-preview") || value.includes("gemini-3.1-flash-image-preview") || value.includes("nano-banana") || value.includes("banana");
+}
+
+function resolveBananaQuality(quality: string) {
+    const value = quality.trim().toLowerCase();
+    if (!value || value === "auto") return undefined;
+    if (value === "1k" || value === "low" || value === "standard") return "1K";
+    if (value === "2k" || value === "medium" || value === "hd") return "2K";
+    if (value === "4k" || value === "high") return "4K";
+    return undefined;
+}
+
+function resolveBananaAspectRatio(size: string) {
+    const value = size.trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    if (value.includes(":")) {
+        parseRatioValue(value);
+        return value;
+    }
+    const dimensions = parseImageDimensions(value);
+    if (!dimensions) throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
+    validateImageSize(dimensions.width, dimensions.height);
+    const divisor = gcd(dimensions.width, dimensions.height);
+    return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y) [x, y] = [y, x % y];
+    return x || 1;
+}
+
+function buildBananaAsyncPayload(config: AiConfig, prompt: string, images?: string[]) {
+    const quality = resolveBananaQuality(config.quality);
+    const aspectRatio = resolveBananaAspectRatio(config.size);
+    const background = normalizeBackground(config.background);
+    return {
+        model: config.model,
+        prompt: withSystemPrompt(config, prompt),
+        ...(images?.length ? { image: images.length === 1 ? images[0] : images } : {}),
+        ...(aspectRatio ? { size: aspectRatio } : {}),
+        ...(quality ? { quality: quality === "4K" ? "2K" : quality } : {}),
+        ...(background ? { background } : {}),
+        n: 1,
+        ...(quality === "4K" ? { extra_body: { google: { image_config: { ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}), image_size: "4K" } } } } : {}),
+    };
 }
 
 /** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". */
@@ -224,79 +280,6 @@ function resolveRequestSize(quality: string | undefined, size: string) {
     throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
 }
 
-function isBananaImageModel(model: string) {
-    const value = model.trim().toLowerCase();
-    return value.includes("gemini-3-pro-image-preview") || value.includes("gemini-3.1-flash-image-preview") || value.includes("nano-banana") || value.includes("banana");
-}
-
-function resolveBananaQuality(quality: string) {
-    const value = quality.trim().toLowerCase();
-    if (!value || value === "auto") return undefined;
-    if (value === "1k") return "1K";
-    if (value === "2k") return "2K";
-    if (value === "4k") return "4K";
-    if (value === "low" || value === "standard") return "1K";
-    if (value === "medium" || value === "hd") return "2K";
-    if (value === "high") return "4K";
-    return undefined;
-}
-
-function resolveBananaAspectRatio(size: string) {
-    const value = size.trim();
-    if (!value || value.toLowerCase() === "auto") return undefined;
-    if (value.includes(":")) {
-        parseImageRatio(value);
-        return value;
-    }
-    const dimensions = parseImageDimensions(value);
-    if (!dimensions) throw new Error("图像尺寸格式不支持，请使用 auto、9:16 或 1024x1024");
-    validateImageSize(dimensions.width, dimensions.height);
-    const divisor = gcd(dimensions.width, dimensions.height);
-    return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
-}
-
-function gcd(a: number, b: number): number {
-    let x = Math.abs(a);
-    let y = Math.abs(b);
-    while (y) {
-        const next = x % y;
-        x = y;
-        y = next;
-    }
-    return x || 1;
-}
-
-type BananaAsyncPayload = {
-    model: string;
-    prompt: string;
-    image?: string | string[];
-    size?: string;
-    quality?: string;
-    n: number;
-    extra_body?: { google: { image_config: { aspect_ratio?: string; image_size: string } } };
-};
-
-function buildBananaAsyncPayload(config: AiConfig, prompt: string, images?: string[]): BananaAsyncPayload {
-    const quality = resolveBananaQuality(config.quality);
-    const aspectRatio = resolveBananaAspectRatio(config.size);
-    return {
-        model: config.model,
-        prompt: withSystemPrompt(config, prompt),
-        ...(images?.length ? { image: images.length === 1 ? images[0] : images } : {}),
-        ...(aspectRatio ? { size: aspectRatio } : {}),
-        ...(quality ? { quality: quality === "4K" ? "2K" : quality } : {}),
-        n: 1,
-        ...(quality === "4K" ? { extra_body: { google: { image_config: { ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}), image_size: "4K" } } } } : {}),
-    };
-}
-
-async function submitBananaAsyncTask(config: AiConfig, prompt: string, images: string[] | undefined, options?: RequestOptions) {
-    const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(config, "/images/generations/async"), buildBananaAsyncPayload(config, prompt, images), { headers: aiHeaders(config, "application/json"), signal: options?.signal });
-    const taskId = resolveTaskId(response.data);
-    options?.onTaskCreated?.(taskId);
-    return await pollSubmittedImageTask(config, taskId, 1, options);
-}
-
 function resolveGeminiImageConfig(config: AiConfig) {
     const value = config.size.trim();
     const dimensions = parseImageDimensions(value);
@@ -344,26 +327,33 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
 }
 
 function parseImagePayload(payload: ImageApiResponse) {
-    if (isFailureCode(payload.code)) {
-        throw new Error(payload.msg || payload.message || "请求失败");
+    if (typeof payload.code === "number" && payload.code !== 0) {
+        throw new Error(payload.msg || "请求失败");
     }
-    if (payload.error?.message) throw new Error(payload.error.message);
+    // 支持 data / images / results 三种返回字段（兼容不同 API）
+    const imageList = payload.data
+        || (payload as Record<string, unknown>).images as Array<Record<string, unknown>> | undefined
+        || (payload as Record<string, unknown>).results as Array<Record<string, unknown>> | undefined
+        || [];
     const images =
-        payload.data
-            ?.map(resolveImageDataUrl)
+        imageList
+            .map(resolveImageDataUrl)
             .filter((value): value is string => Boolean(value))
-            .map((dataUrl) => ({ id: nanoid(), dataUrl })) || [];
+            .map((dataUrl) => ({ id: nanoid(), dataUrl }));
 
     if (images.length === 0) {
-        throw new Error("接口没有返回图片");
+        // 尝试检查是否有返回了但格式不被识别的数据
+        const rawKeys = Object.keys(payload).filter((k) => k !== "code" && k !== "msg" && k !== "error");
+        throw new Error(rawKeys.length > 0
+            ? `接口返回了未知格式的数据（字段：${rawKeys.join("、")}），请检查模型或接口兼容性`
+            : "接口没有返回图片，请检查提示词是否触发安全审核或模型是否支持该操作");
     }
 
     return images;
 }
 
 function isFailureCode(code: unknown) {
-    if (code === undefined || code === null || code === 0 || code === "0" || code === "success") return false;
-    return true;
+    return !(code === undefined || code === null || code === 0 || code === "0" || code === "success");
 }
 
 function unwrapTaskPayload(payload: ImageAsyncTaskResponse): ImageAsyncTaskResponse {
@@ -379,47 +369,31 @@ function resolveTaskId(payload: ImageAsyncTaskResponse) {
     return taskId;
 }
 
-function normalizeTaskStatus(status: unknown) {
-    return String(status || "").trim().toUpperCase();
-}
-
-function resolveTaskResultUrls(task: ImageAsyncTaskResponse): string[] {
+function resolveTaskResultUrls(task: ImageAsyncTaskResponse) {
     const urls = [stringValue(task.result_url), stringValue(task.url)];
     const data = isRecord(task.data) ? task.data : undefined;
-    const nestedData = data && isRecord(data.data) ? data.data : undefined;
-    const nestedItems = Array.isArray(nestedData?.data) ? nestedData.data : Array.isArray(data?.data) ? data.data : [];
-    for (const item of nestedItems) {
-        if (isRecord(item)) urls.push(stringValue(item.url));
-    }
+    const nested = data && isRecord(data.data) ? data.data : undefined;
+    const items = Array.isArray(nested?.data) ? nested.data : Array.isArray(data?.data) ? data.data : [];
+    for (const item of items) if (isRecord(item)) urls.push(stringValue(item.url));
     return Array.from(new Set(urls.filter(Boolean)));
 }
 
 function resolveTaskInlineImages(task: ImageAsyncTaskResponse) {
-    const directData = Array.isArray(task.data) ? task.data : [];
+    const direct = Array.isArray(task.data) ? task.data : [];
     const data = isRecord(task.data) ? task.data : undefined;
-    const nestedData = data && isRecord(data.data) ? data.data : undefined;
-    const nestedItems = Array.isArray(nestedData?.data) ? nestedData.data : Array.isArray(data?.data) ? data.data : [];
-    return [...directData, ...nestedItems]
-        .filter(isRecord)
-        .map(resolveImageDataUrl)
-        .filter((value): value is string => Boolean(value));
+    const nested = data && isRecord(data.data) ? data.data : undefined;
+    const items = Array.isArray(nested?.data) ? nested.data : Array.isArray(data?.data) ? data.data : [];
+    return [...direct, ...items].filter(isRecord).map(resolveImageDataUrl).filter((value): value is string => Boolean(value));
 }
 
 function delay(ms: number, signal?: AbortSignal) {
     return new Promise<void>((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(new DOMException("Aborted", "AbortError"));
-            return;
-        }
+        if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
         const timer = globalThis.setTimeout(resolve, ms);
-        signal?.addEventListener(
-            "abort",
-            () => {
-                globalThis.clearTimeout(timer);
-                reject(new DOMException("Aborted", "AbortError"));
-            },
-            { once: true },
-        );
+        signal?.addEventListener("abort", () => {
+            globalThis.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
     });
 }
 
@@ -432,19 +406,34 @@ async function blobToDataUrl(blob: Blob) {
     });
 }
 
-function resolveTaskResultUrl(config: AiConfig, url: string) {
-    try {
-        return new URL(url).toString();
-    } catch {
-        if (!url.startsWith("/")) return url;
-        return new URL(url, aiApiUrl(config, "/")).toString();
-    }
-}
-
 async function fetchProtectedImageDataUrl(config: AiConfig, url: string, options?: RequestOptions) {
-    const response = await fetch(resolveTaskResultUrl(config, url), { headers: aiHeaders(config), signal: options?.signal });
+    let target = url;
+    try { target = new URL(url).toString(); } catch { if (url.startsWith("/")) target = new URL(url, aiApiUrl(config, "/")).toString(); }
+    const response = await fetch(target, { headers: aiHeaders(config), signal: options?.signal });
     if (!response.ok) throw new ImageTaskPermanentError(await readFetchError(response, "获取图片结果失败"));
     return await blobToDataUrl(await response.blob());
+}
+
+async function pollImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {
+    const timeoutAt = Date.now() + 10 * 60 * 1000;
+    let interval = 1200;
+    while (Date.now() < timeoutAt) {
+        const response = await axios.get<ImageAsyncTaskResponse>(aiApiUrl(config, `/images/tasks/${encodeURIComponent(taskId)}`), { headers: aiHeaders(config), signal: options?.signal });
+        const task = unwrapTaskPayload(response.data);
+        const status = String(task.status || "").trim().toUpperCase();
+        if (["FAILURE", "FAILED", "ERROR"].includes(status)) throw new ImageTaskPermanentError(stringValue(task.fail_reason) || task.message || task.msg || "图片生成失败");
+        if (["SUCCESS", "SUCCEEDED", "COMPLETED", "DONE"].includes(status)) {
+            const inline = resolveTaskInlineImages(task);
+            const urls = resolveTaskResultUrls(task);
+            const fetched = await Promise.all(urls.slice(0, expectedCount || urls.length || 1).map((url) => fetchProtectedImageDataUrl(config, url, options)));
+            const images = [...inline, ...fetched].filter(Boolean);
+            if (!images.length) throw new Error("任务成功但没有返回图片地址");
+            return images.slice(0, expectedCount || images.length).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        }
+        await delay(interval, options?.signal);
+        interval = Math.min(5000, Math.round(interval * 1.25));
+    }
+    throw new Error("图片生成任务超时，请稍后重试");
 }
 
 async function pollSubmittedImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {
@@ -463,42 +452,73 @@ export async function resumeImageTask(config: AiConfig, taskId: string, options?
     return await pollSubmittedImageTask(requestConfig, taskId, 1, options);
 }
 
-async function pollImageTask(config: AiConfig, taskId: string, expectedCount: number, options?: RequestOptions) {
-    const timeoutAt = Date.now() + 10 * 60 * 1000;
-    let interval = 1200;
-    while (Date.now() < timeoutAt) {
-        const response = await axios.get<ImageAsyncTaskResponse>(aiApiUrl(config, `/images/tasks/${encodeURIComponent(taskId)}`), { headers: aiHeaders(config), signal: options?.signal });
-        const task = unwrapTaskPayload(response.data);
-        const status = normalizeTaskStatus(task.status);
-        if (status === "FAILURE" || status === "FAILED" || status === "ERROR") throw new ImageTaskPermanentError(stringValue(task.fail_reason) || task.message || task.msg || "图片生成失败");
-        if (status === "SUCCESS" || status === "SUCCEEDED" || status === "COMPLETED" || status === "DONE") {
-            const inlineImages = resolveTaskInlineImages(task);
-            const urls = resolveTaskResultUrls(task);
-            const urlImages = await Promise.all(urls.slice(0, expectedCount || urls.length || 1).map((url) => fetchProtectedImageDataUrl(config, url, options)));
-            const images = [...inlineImages, ...urlImages].filter(Boolean);
-            if (!images.length) throw new Error("任务成功但没有返回图片地址");
-            return images.slice(0, expectedCount || images.length).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+async function submitAsyncTask(config: AiConfig, body: FormData | Record<string, unknown>, expectedCount: number, options?: RequestOptions) {
+    const isForm = body instanceof FormData;
+    const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(config, "/images/generations/async"), body, {
+        headers: aiHeaders(config, isForm ? undefined : "application/json"),
+        signal: options?.signal,
+    });
+    const taskId = resolveTaskId(response.data);
+    options?.onTaskCreated?.(taskId);
+    return await pollSubmittedImageTask(config, taskId, expectedCount, options);
+}
+
+function readApiErrorMessage(value: unknown): string {
+    if (!value) return "";
+    if (typeof value === "string") {
+        // 可能是 JSON 字符串（如 error.message 被序列化）或纯文本错误
+        try {
+            const parsed = JSON.parse(value);
+            const inner = readApiErrorMessage(parsed) || value;
+            // 如果 JSON 解析后得到 "{}" 这种空对象，返回原始字符串
+            if (inner === value && typeof parsed === "object" && Object.keys(parsed).length === 0) return "";
+            return inner;
+        } catch {
+            // 检查是否是 HTML 错误页面
+            if (/<[a-z][\s\S]*>/i.test(value)) return `服务返回了 HTML 错误页面（${value.slice(0, 80)}...）`;
+            return value;
         }
-        await delay(interval, options?.signal);
-        interval = Math.min(5000, Math.round(interval * 1.25));
     }
-    throw new Error("图片生成任务超时，请稍后重试");
+    if (typeof value !== "object") return "";
+    const payload = value as { msg?: unknown; message?: unknown; error?: unknown; detail?: unknown };
+    // error 可能是字符串或含 message 的对象
+    const errorMsg =
+        typeof payload.error === "string"
+            ? payload.error
+            : (payload.error as { message?: unknown })?.message;
+    return (
+        readApiErrorMessage(payload.msg) ||
+        readApiErrorMessage(payload.message) ||
+        readApiErrorMessage(errorMsg) ||
+        readApiErrorMessage(payload.detail) ||
+        ""
+    );
 }
 
 function readAxiosError(error: unknown, fallback: string) {
     if (axios.isCancel(error)) return "请求已取消";
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
+    if (axios.isAxiosError(error)) {
         const responseData = error.response?.data;
-        return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
+        // 优先从响应体提取业务错误
+        const apiMsg = readApiErrorMessage(responseData);
+        if (apiMsg) return apiMsg;
+        // 响应体无法提取时用 HTTP 状态推断
+        const statusMsg = readStatusError(error.response?.status, fallback);
+        if (statusMsg) return statusMsg;
+        // 最后用 axios 自身的错误文本
+        return error.message || fallback;
     }
     if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
-    return error instanceof Error ? error.message : fallback;
+    return error instanceof Error ? readApiErrorMessage(error.message) || error.message : fallback;
 }
 
 function readStatusError(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
-    return status ? `${fallback}：${status}` : fallback;
+    if (status === 404) return "接口地址不存在（404），请检查 Base URL 和模型选择";
+    if (status === 502) return "网关错误（502），接口服务暂时不可用，请稍后重试";
+    if (status === 503) return "服务繁忙（503），请稍后重试";
+    return status ? `请求失败（HTTP ${status}），请检查 Base URL 和 API Key 是否正确` : fallback;
 }
 
 function withSystemPrompt(config: AiConfig, prompt: string) {
@@ -890,32 +910,33 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    if (isBananaImageModel(requestConfig.model)) {
+    const script = resolveModelScript(config, config.model || config.imageModel);
+    if (script) {
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
         try {
-            return await submitBananaAsyncTask(requestConfig, prompt, undefined, options);
+            const result = await runModelPlugin({ capability: "image", script, config: requestConfig, prompt: withSystemPrompt(requestConfig, prompt), images: [], params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) }, signal: options?.signal });
+            return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            if (isImageTaskPollingError(error)) throw error;
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
-    const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, prompt));
-    formData.set("response_format", "url");
-    if (quality) {
-        formData.set("quality", quality);
-    }
-    if (requestSize) {
-        formData.set("size", requestSize);
-    }
-
     try {
-        const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const taskId = resolveTaskId(response.data);
-        options?.onTaskCreated?.(taskId);
-        return await pollSubmittedImageTask(requestConfig, taskId, n, options);
+        if (isBananaImageModel(requestConfig.model)) {
+            return await submitAsyncTask(requestConfig, buildBananaAsyncPayload(requestConfig, prompt), 1, options);
+        }
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        const formData = new FormData();
+        formData.set("model", requestConfig.model);
+        formData.set("prompt", withSystemPrompt(requestConfig, prompt));
+        formData.set("response_format", "url");
+        if (quality) formData.set("quality", quality);
+        if (requestSize) formData.set("size", requestSize);
+        if (background) formData.set("background", background);
+        return await submitAsyncTask(requestConfig, formData, n, options);
     } catch (error) {
         if (isImageTaskPollingError(error)) throw error;
         throw new Error(readAxiosError(error, "请求失败"));
@@ -926,39 +947,51 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    if (isBananaImageModel(requestConfig.model)) {
+    const script = resolveModelScript(config, config.model || config.imageModel);
+    if (script) {
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
         try {
-            const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
-            return await submitBananaAsyncTask(requestConfig, requestPrompt, images, options);
+            const result = await runModelPlugin({ capability: "image", script, config: requestConfig, prompt: withSystemPrompt(requestConfig, requestPrompt), images: refs, params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) }, signal: options?.signal });
+            return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            if (isImageTaskPollingError(error)) throw error;
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
-    const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("response_format", "url");
-    if (quality) {
-        formData.set("quality", quality);
-    }
-    if (requestSize) {
-        formData.set("size", requestSize);
-    }
-    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    const imageFieldName = files.length > 1 ? "image[]" : "image";
-    files.forEach((file) => {
-        formData.append(imageFieldName, file);
-    });
-    if (mask) formData.set("mask", dataUrlToFile(mask));
-
     try {
-        const response = await axios.post<ImageAsyncTaskResponse>(aiApiUrl(requestConfig, "/images/generations/async"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const taskId = resolveTaskId(response.data);
-        options?.onTaskCreated?.(taskId);
-        return await pollSubmittedImageTask(requestConfig, taskId, n, options);
+        const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        if (isBananaImageModel(requestConfig.model)) {
+            return await submitAsyncTask(requestConfig, buildBananaAsyncPayload(requestConfig, requestPrompt, refs), 1, options);
+        }
+        const quality = normalizeQuality(config.quality);
+        const requestSize = resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        if (requestConfig.apiFormat === "ark") {
+            if (mask) throw new Error("蒙版编辑暂不支持该模型，请使用其他渠道");
+            return await submitAsyncTask(requestConfig, {
+                model: requestConfig.model,
+                prompt: withSystemPrompt(requestConfig, requestPrompt),
+                response_format: "url",
+                image: refs,
+                ...(quality ? { quality } : {}),
+                ...(requestSize ? { size: requestSize } : {}),
+                ...(background ? { background } : {}),
+            }, n, options);
+        }
+        const formData = new FormData();
+        formData.set("model", requestConfig.model);
+        formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
+        formData.set("response_format", "url");
+        if (quality) formData.set("quality", quality);
+        if (requestSize) formData.set("size", requestSize);
+        if (background) formData.set("background", background);
+        const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
+        const field = files.length > 1 ? "image[]" : "image";
+        files.forEach((file) => formData.append(field, file));
+        if (mask) formData.set("mask", dataUrlToFile(mask));
+        return await submitAsyncTask(requestConfig, formData, n, options);
     } catch (error) {
         if (isImageTaskPollingError(error)) throw error;
         throw new Error(readAxiosError(error, "请求失败"));
@@ -967,6 +1000,24 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
+    const script = resolveModelScript(config, config.model || config.textModel);
+    if (script) {
+        try {
+            const answer = await runModelPlugin<string>({
+                capability: "text",
+                script,
+                config: requestConfig,
+                messages: withSystemMessage(requestConfig, messages),
+                signal: options?.signal,
+                onDelta,
+            });
+            const text = String(answer ?? "").trim() || "没有返回内容";
+            if (text === "没有返回内容") onDelta(text);
+            return text;
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     try {
         if (requestConfig.apiFormat === "gemini") {
             const answer = (await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages), onDelta, options)).content || "没有返回内容";
@@ -976,6 +1027,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         const answer = (await requestStreamingResponse(requestConfig, {
             model: requestConfig.model,
             input: toResponseInput(withSystemMessage(requestConfig, messages)),
+            ...(requestConfig.reasoningEffort === "auto" ? {} : { reasoning: { effort: requestConfig.reasoningEffort } }),
         }, onDelta, options)).content || "没有返回内容";
         if (answer === "没有返回内容") onDelta(answer);
         return answer;

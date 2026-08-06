@@ -11,47 +11,44 @@ import {formatDateForFilename} from "./date.js";
 export class Logger {
     readonly enabled = process.argv.includes("--debug");
     readonly filePath = this.enabled ? path.join(os.homedir(), ".infinite-canvas", "logs", `canvas-agent-${formatDateForFilename()}.log`) : "";
-    private readonly logger: WinstonLogger | null;
+    private readonly logger: WinstonLogger;
 
-    /** 根据命令行 Debug 参数初始化日志输出。 */
+    /** 普通模式输出 Info 以上日志，Debug 模式额外输出 Debug 并写入文件。 */
     constructor() {
-        if (!this.enabled) {
-            this.logger = null;
-            return;
-        }
-        fs.mkdirSync(path.dirname(this.filePath), {recursive: true});
         const line = format.printf(({level, message, timestamp, details}) => `${timestamp} ${level.toUpperCase()} ${message}${formatDetails(details)}`);
+        const output = format.combine(format.timestamp({format: "YYYY-MM-DD HH:mm:ss"}), line);
+        if (this.enabled) fs.mkdirSync(path.dirname(this.filePath), {recursive: true});
         this.logger = winston.createLogger({
-            level: "debug",
+            level: this.enabled ? "debug" : "info",
             transports: [
-                new transports.Console({format: format.combine(format.timestamp({format: "HH:mm:ss"}), line)}),
-                new transports.File({filename: this.filePath, format: format.combine(format.timestamp({format: "HH:mm:ss"}), line)}),
+                new transports.Console({format: output}),
+                ...(this.enabled ? [new transports.File({filename: this.filePath, format: output})] : []),
             ],
         });
     }
 
     /** 输出 Debug 级别日志。 */
     debug(message: string, details?: unknown) {
-        if (details === undefined) this.logger?.debug(message);
-        else this.logger?.debug(message, {details: sanitize(details)});
+        if (details === undefined) this.logger.debug(message);
+        else this.logger.debug(message, {details: sanitize(details)});
     }
 
     /** 输出 Info 级别日志。 */
     info(message: string, details?: unknown) {
-        if (details === undefined) this.logger?.info(message);
-        else this.logger?.info(message, {details: sanitize(details)});
+        if (details === undefined) this.logger.info(message);
+        else this.logger.info(message, {details: sanitize(details)});
     }
 
     /** 输出 Warn 级别日志。 */
     warn(message: string, details?: unknown) {
-        if (details === undefined) this.logger?.warn(message);
-        else this.logger?.warn(message, {details: sanitize(details)});
+        if (details === undefined) this.logger.warn(message);
+        else this.logger.warn(message, {details: sanitize(details)});
     }
 
     /** 输出 Error 级别日志。 */
     error(message: string, details?: unknown) {
-        if (details === undefined) this.logger?.error(message);
-        else this.logger?.error(message, {details: sanitize(details)});
+        if (details === undefined) this.logger.error(message);
+        else this.logger.error(message, {details: sanitize(details)});
     }
 }
 

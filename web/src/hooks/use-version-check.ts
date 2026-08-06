@@ -7,18 +7,11 @@ function readLocalReleases(): ReleaseInfo[] {
     return __APP_RELEASES__ || [];
 }
 
-/** 版本信息仅使用构建时内置内容，不发起任何远程检查请求。 */
+/** Use only the release information embedded at build time; never make a remote version request. */
 export function useVersionCheck() {
     const [open, setOpen] = useState(false);
     const releases = useMemo(readLocalReleases, []);
     const openReleaseModal = useCallback(() => setOpen(true), []);
 
-    return {
-        open,
-        setOpen,
-        openReleaseModal,
-        latestVersion: APP_VERSION,
-        releases,
-        hasNewVersion: false,
-    };
+    return { open, setOpen, openReleaseModal, latestVersion: APP_VERSION, releases, hasNewVersion: false };
 }
